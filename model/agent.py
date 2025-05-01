@@ -3,8 +3,23 @@ import random
 from collections import defaultdict
 
 class QLearningAgent:
-    def __init__(self, offset_bins=6, curvature_bins=7, alpha=0.1, gamma=0.95,
-                 epsilon=1.0, epsilon_decay=0.995, epsilon_min=0.05):
+    """
+    A Q-learning agent for learning steering control on a racing track.
+
+    Attributes:
+        offset_bins (int): Number of bins for discretizing lateral offset.
+        curvature_bins (int): Number of bins for discretizing curvature.
+        alpha (float): Learning rate.
+        gamma (float): Discount factor for future rewards.
+        epsilon (float): Initial exploration rate.
+        epsilon_decay (float): Rate at which epsilon decays after each episode.
+        epsilon_min (float): Minimum value for epsilon.
+        actions (List[float]): Set of possible steering angle changes.
+        q_table (defaultdict): Q-table mapping discretized states to action-values.
+    """
+
+    def __init__(self, offset_bins=8, curvature_bins=8, alpha=0.1, gamma=0.95,
+                 epsilon=1.0, epsilon_decay=0.98, epsilon_min=0.05):
         self.offset_bins = offset_bins
         self.curvature_bins = curvature_bins
         self.alpha = alpha
@@ -13,54 +28,66 @@ class QLearningAgent:
         self.epsilon_decay = epsilon_decay
         self.epsilon_min = epsilon_min
 
-        # Steering actions (steering deltas)
-        self.actions = [-1, 0, 1]  # steer left, stay, steer right
+        # Fine-grained steering control actions (from hard left to hard right)
+        self.actions = [-0.5, -0.3, -0.15, 0.0, 0.15, 0.3, 0.5]
 
-        # Q-table indexed by (curv_bin, offset_bin)
+        # Q-table with default value 0.0 for all actions in unseen states
         self.q_table = defaultdict(lambda: {a: 0.0 for a in self.actions})
 
     def _discretize_state(self, state):
         """
-        Discretizes the extended state:
-        (normalized_pos, norm_offset, offset_velocity, steering_angle, curvature_now, curvature_5, curvature_10)
+        Converts the continuous environment state into a discrete tuple used for indexing the Q-table.
         """
-        pos_bin = int(state[0] * 10)  # 10 bins for position [0, 1]
+        normalized_pos, norm_offset, offset_velocity, steering_angle, curvature_now, curvature_5, curvature_10 = state
 
-        offset_bin = int((state[1] + 1) * 5)  # [-1, 1] → [0, 10]
-        offset_bin = np.clip(offset_bin, 0, 10)
+        # Discretize progress along the track (0 to 9)
+        pos_bin = np.clip(int(normalized_pos * 10), 0, 9)
 
-        # Prioritized discretization for offset velocity
-        vel = np.clip(state[2], -3.0, 3.0)  # most values fall here
-        vel_bin = int((vel + 3) / 6 * 5)  # [-3, 3] → [0, 5]
-        vel_bin = np.clip(vel_bin, 0, 5)
+        # Discretize lateral offset (-1 to 1 mapped into bins)
+        offset_bin = np.clip(int((norm_offset + 1.0) * (self.offset_bins / 2)), 0, self.offset_bins - 1)
 
-        # Prioritized discretization for steering angle
-        steer = np.clip(state[3], -0.5, 0.5)  # steering is limited by environment
-        steer_bin = int((steer + 0.5) / 1.0 * 5)  # [-0.5, 0.5] → [0, 5]
-        steer_bin = np.clip(steer_bin, 0, 5)
+        # Discretize steering angle (-0.5 to 0.5)
+        steering_bin = np.clip(int((steering_angle + 0.5) * 5), 0, 5)
 
-        # Curvature now, +5, +10 (nonlinear binning works fine for these)
-        curv_now_bin = min(int(state[4] * self.curvature_bins), self.curvature_bins - 1)
-        curv_5_bin = min(int(state[5] * self.curvature_bins), self.curvature_bins - 1)
-        curv_10_bin = min(int(state[6] * self.curvature_bins), self.curvature_bins - 1)
+        # Discretize curvature values (scaled for precision)
+        curv_scale = 20.0
+        curvature_now_bin = int(np.clip(curvature_now * curv_scale, 0, self.curvature_bins - 1))
+        curvature_5_bin = int(np.clip(curvature_5 * curv_scale, 0, self.curvature_bins - 1))
+        curvature_10_bin = int(np.clip(curvature_10 * curv_scale, 0, self.curvature_bins - 1))
 
-        return pos_bin, offset_bin, vel_bin, steer_bin, curv_now_bin, curv_5_bin, curv_10_bin
+        return (pos_bin, offset_bin, steering_bin, curvature_now_bin, curvature_5_bin, curvature_10_bin)
 
     def choose_action(self, state):
+        """
+        Chooses an action using epsilon-greedy policy. In curves, exploration is boosted.
+        """
         discrete_state = self._discretize_state(state)
-        if np.random.rand() < self.epsilon:
+        curvature_now = state[4]
+
+        # Increase exploration in curves
+        epsilon_local = min(self.epsilon * 2 if abs(curvature_now) > 0.01 else self.epsilon, 1.0)
+
+        if random.random() < epsilon_local:
             return random.choice(self.actions)
+
+        # Greedy action selection
         q_values = self.q_table[discrete_state]
         return max(q_values, key=q_values.get)
 
     def learn(self, state, action, reward, next_state, done):
+        """
+        Performs the Q-learning update based on the observed transition.
+        """
         s = self._discretize_state(state)
         s_next = self._discretize_state(next_state)
 
         q_current = self.q_table[s][action]
         q_max_next = max(self.q_table[s_next].values()) if not done else 0.0
 
+        # Standard Q-learning formula
         self.q_table[s][action] += self.alpha * (reward + self.gamma * q_max_next - q_current)
 
         if done:
+            # Decay epsilon and learning rate at end of episode
             self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
+            self.alpha = max(self.alpha * 0.99, 0.01)

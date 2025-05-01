@@ -1,111 +1,135 @@
 import numpy as np
+from scipy.interpolate import splprep, splev
 
 class Car:
+    """
+    Simulates a vehicle driving along a predefined spline path.
+    Includes physics-based acceleration, braking, drag, and curvature-based speed adaptation.
+    """
+
     def __init__(self, x_spline, y_spline, track_width):
+        # Track spline and geometry
         self.car_x = x_spline
         self.car_y = y_spline
         self.track_width = track_width
+        self.path_points = np.column_stack((x_spline, y_spline))
+
+        # Vehicle state
+        self.speed = 2.0  # initial speed (m/s)
+        self.throttle = 0.5
+        self.acceleration = 0.0
+        self.max_speed_reached = self.speed
+        self.distance_traveled = 0.0
         self.car_index = 0
-        self.speed = 2  # Start with a small initial speed (m/s)
-        self.acceleration = 0  # m/s²
-        self.throttle = 0.5  # Start with half throttle (can be adjusted)
-        self.mass = 1350  # kg (GT3 car)
-        self.engine_power = 275000  # W (~500 HP)
+        self.steering_angle = 0.0
+
+        # Vehicle parameters
+        self.mass = 1350  # kg
+        self.engine_power = 275000  # W
         self.transmission_efficiency = 0.9
+        self.Cd = 0.35  # drag coefficient
+        self.rho = 1.225  # air density
+        self.A = 2.0  # frontal area (m^2)
+        self.Cr = 0.01  # rolling resistance coefficient
+        self.g = 9.81  # gravity
 
-        # Drag force parameters
-        self.Cd = 0.35
-        self.rho = 1.225
-        self.A = 2.0
+        # Precompute path distances and total length
+        self.distances = np.sqrt(np.sum(np.diff(self.path_points, axis=0) ** 2, axis=1))
+        self.cumulative_distance = np.insert(np.cumsum(self.distances), 0, 0)
+        self.total_length = self.cumulative_distance[-1]
 
-        # Rolling resistance parameters
-        self.Cr = 0.01
-        self.g = 9.81
-
-        self.speed_profile = self.compute_speed_profile(self.car_x, self.car_y)
+        # Spline for curvature analysis
+        tck, _ = splprep([self.car_x, self.car_y], u=self.cumulative_distance, s=0)
+        self.curvature_spline = tck
 
     def compute_acceleration(self):
-        self.throttle = np.clip(self.throttle, 0, 1)
-        min_speed = 1
-        effective_speed = max(self.speed, min_speed)
-        force_accel = (self.engine_power * self.transmission_efficiency) / effective_speed
-        accel_throttle = (force_accel * self.throttle) / self.mass
-        force_drag = 0.5 * self.Cd * self.rho * self.A * (self.speed ** 2)
-        accel_drag = force_drag / self.mass
-        force_rolling = self.Cr * self.mass * self.g
-        accel_rolling = force_rolling / self.mass
-        self.acceleration = accel_throttle - accel_drag - accel_rolling
+        """
+        Computes longitudinal acceleration based on throttle, drag, and rolling resistance.
+        """
+        if self.throttle < 0:  # Braking
+            brake_force = abs(self.throttle) * self.mass * self.g * 0.6  # assume 0.6g decel
+            self.acceleration = -brake_force / self.mass
+        else:  # Accelerating
+            effective_speed = max(self.speed, 1.0)  # avoid division by zero
+            engine_force = (self.engine_power * self.transmission_efficiency) / effective_speed
+            drag_force = 0.5 * self.Cd * self.rho * self.A * self.speed ** 2
+            rolling_force = self.Cr * self.mass * self.g
+
+            net_force = engine_force * self.throttle - drag_force - rolling_force
+            self.acceleration = net_force / self.mass
+
         return self.acceleration
 
-    def compute_speed_profile(self, track_x, track_y, base_speed=2.0):
-        dx = np.gradient(track_x)
-        dy = np.gradient(track_y)
-        ddx = np.gradient(dx)
-        ddy = np.gradient(dy)
-        curvature = np.abs(dx * ddy - dy * ddx) / (dx**2 + dy**2 + 1e-5) ** 1.5
-        max_curvature = np.max(curvature)
-        speed = base_speed * (1 - curvature / (max_curvature + 1e-5))
-        speed = np.clip(speed, 0.5, base_speed)
-        return speed
-
-    def compute_local_curvature_radius(self, index):
-        if index <= 0 or index >= len(self.car_x) - 1:
-            return float('inf')
-
-        dx = (self.car_x[index + 1] - self.car_x[index - 1]) / 2
-        dy = (self.car_y[index + 1] - self.car_y[index - 1]) / 2
-        ddx = self.car_x[index + 1] - 2 * self.car_x[index] + self.car_x[index - 1]
-        ddy = self.car_y[index + 1] - 2 * self.car_y[index] + self.car_y[index - 1]
+    def compute_local_curvature_radius_by_distance(self):
+        """
+        Returns the local curvature radius at the current distance along the path.
+        """
+        u = self.distance_traveled
+        dx, dy = splev(u, self.curvature_spline, der=1)
+        ddx, ddy = splev(u, self.curvature_spline, der=2)
 
         numerator = abs(dx * ddy - dy * ddx)
-        denominator = (dx**2 + dy**2) ** 1.5
-
+        denominator = (dx ** 2 + dy ** 2) ** 1.5
         if denominator == 0:
             return float('inf')
 
         curvature = numerator / denominator
-        radius = 1 / curvature if curvature != 0 else float('inf')
-        return radius
+        return 1 / curvature if curvature != 0 else float('inf')
 
     def compute_max_lateral_speed(self, radius, mu=1.3):
+        """
+        Computes the maximum lateral speed based on curvature radius and friction coefficient.
+        """
         if radius == float('inf'):
             return float('inf')
         return np.sqrt(mu * self.g * radius)
 
     def move_car(self, dt=0.016):
         """
-        Updates car's speed and position with smooth throttle/brake transitions based on curve radius.
+        Advances the car forward by dt seconds using basic longitudinal dynamics.
+        Adjusts throttle based on curvature-constrained safe speed.
         """
-        # --- Curve-based logic ---
-        radius = self.compute_local_curvature_radius(self.car_index)
-        safe_speed = self.compute_max_lateral_speed(radius)
+        radius = self.compute_local_curvature_radius_by_distance()
 
-        # Determine target throttle (range: 0 = braking, 1 = full throttle)
-        if self.speed > safe_speed:
-            target_throttle = 0.2  # reduce throttle
-        else:
-            target_throttle = 0.6  # accelerate
+        # Smooth curvature estimate for throttle control
+        self.smoothed_radius = 0.9 * getattr(self, "smoothed_radius", radius) + 0.1 * radius
+        safe_speed = self.compute_max_lateral_speed(self.smoothed_radius)
 
-        # --- Smooth throttle transition ---
-        throttle_response = 1.5  # units per second (can be tuned)
+        # Ratio of current speed to curvature-constrained limit
+        speed_ratio = self.speed / (safe_speed + 1e-5)
+
+        # Map speed ratio to throttle target (linear response curve)
+        target_throttle = 1.5 - 2.0 * speed_ratio
+        target_throttle = np.clip(target_throttle, -1.0, 1.0)
+
+        # Smooth throttle transition
+        throttle_response = 2.0  # responsiveness factor
         if self.throttle < target_throttle:
             self.throttle += throttle_response * dt
         elif self.throttle > target_throttle:
             self.throttle -= throttle_response * dt
+        self.throttle = np.clip(self.throttle, -1, 1)
 
-        self.throttle = np.clip(self.throttle, 0, 1)
-
-        # --- Continue physics ---
+        # Update physics
         self.compute_acceleration()
         self.speed += self.acceleration * dt
         self.speed = max(self.speed, 0)
+        self.max_speed_reached = max(self.max_speed_reached, self.speed)
 
-        # Move forward
-        if self.car_index < len(self.car_x) - 1:
-            self.car_index += int(self.speed * dt * 10)
-            self.car_index = min(self.car_index, len(self.car_x) - 1)
+        # Advance along path
+        self.distance_traveled += self.speed * dt
+        self.distance_traveled = min(self.distance_traveled, self.total_length)
 
     def get_position(self):
-        if self.car_index < len(self.car_x):
-            return self.car_x[self.car_index], self.car_y[self.car_index]
-        return None
+        """
+        Returns the current position of the car on the path, or None if finished.
+        """
+        if self.is_finished():
+            return None
+        return splev(self.distance_traveled, self.curvature_spline)
+
+    def is_finished(self):
+        """
+        Returns True if the car reached the end of the path.
+        """
+        return self.distance_traveled >= self.total_length
