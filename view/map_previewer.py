@@ -28,16 +28,6 @@ class MapPreviewer:
         self.map_area_width = 850
         self.sidebar_width = self.WIDTH - self.map_area_width
 
-    def scale_map_to_left_area(self, x, y, margin=50):
-        """Scales and shifts the track coordinates to fit the left map area."""
-        drawable_width = self.map_area_width - 2 * margin
-        drawable_height = self.HEIGHT - 2 * margin
-
-        x = (x - np.min(x)) / (np.max(x) - np.min(x)) * drawable_width + margin
-        y = (y - np.min(y)) / (np.max(y) - np.min(y)) * drawable_height + margin
-        x += margin // 2  # Additional horizontal shift
-        return x, y
-
     def compute_arc_length(self, x, y):
         """Computes the arc length of a path defined by x and y coordinates."""
         points = np.column_stack((x, y))
@@ -45,7 +35,7 @@ class MapPreviewer:
         segment_lengths = np.linalg.norm(diffs, axis=1)
         return np.sum(segment_lengths)
 
-    def preview_map(self, visualizer, x, y, track_width):
+    def preview_map(self, visualizer, track):
         """
         Displays the map and UI for previewing, regenerating, or saving the track.
 
@@ -62,21 +52,8 @@ class MapPreviewer:
             self.screen.blit(text, text_rect)
             return btn_rect
 
-        def compute_boundaries(x, y, width):
-            dx = np.gradient(x)
-            dy = np.gradient(y)
-            length = np.sqrt(dx ** 2 + dy ** 2)
-            length[length == 0] = 1
-            dx /= length
-            dy /= length
-            left_x = x + (width / 2) * dy
-            left_y = y - (width / 2) * dx
-            right_x = x - (width / 2) * dy
-            right_y = y + (width / 2) * dx
-            return left_x, left_y, right_x, right_y
-
-        x, y = self.scale_map_to_left_area(x, y)
-        left_x, left_y, right_x, right_y = compute_boundaries(x, y, track_width)
+        track.scale_map_to_left_area(self.map_area_width, self.HEIGHT)
+        left_x, left_y, right_x, right_y = track.compute_boundaries()
 
         while True:
             self.screen.fill(MAP_BG)
@@ -85,7 +62,7 @@ class MapPreviewer:
             # Draw track polygon and centerline
             map_poly = list(zip(left_x, left_y)) + list(zip(right_x[::-1], right_y[::-1]))
             pygame.draw.polygon(self.screen, TRACK_GREEN, map_poly)
-            pygame.draw.lines(self.screen, TRACK_LINE, False, list(zip(x, y)), 2)
+            pygame.draw.lines(self.screen, TRACK_LINE, False, list(zip(track.x, track.y)), 2)
 
             # Sidebar title
             title = self.font.render("Track Preview", True, TEXT_COLOR)
@@ -95,11 +72,11 @@ class MapPreviewer:
                              (self.map_area_width + 20, 80), (self.WIDTH - 20, 80), 2)
 
             # Track info
-            track_length_m = self.compute_arc_length(x, y)
+            track_length_m = self.compute_arc_length(track.x, track.y)
             approx_length_km = track_length_m / 1000
             track_info_lines = [
                 f"Length: {approx_length_km:.2f} km",
-                f"Width: {int(track_width)} m"
+                f"Width: {int(track.width)} m"
             ]
             start_y = 100
             line_spacing = 30
@@ -128,9 +105,8 @@ class MapPreviewer:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if regenerate_btn.collidepoint(event.pos):
                         track = Track()
-                        x_new, y_new, track_width = track.generate_map()
-                        x, y = self.scale_map_to_left_area(x_new, y_new)
-                        left_x, left_y, right_x, right_y = compute_boundaries(x, y, track_width)
+                        x, y = track.scale_map_to_left_area(self.map_area_width, self.HEIGHT)
+                        left_x, left_y, right_x, right_y = track.compute_boundaries()
 
                     elif save_btn.collidepoint(event.pos):
                         try:

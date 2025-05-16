@@ -3,6 +3,8 @@ import pygame
 from scipy.interpolate import splprep, splev
 from shapely.geometry import LineString, Point, Polygon
 
+from view.utils import compute_scaling_and_transform
+
 from model.car import Car
 from model.track import Track
 from model.racing_env import RacingEnv
@@ -11,25 +13,111 @@ from model.path_planning.a_star_planner import AStarPlanner
 from model.path_planning.grid_builder import GridBuilder
 from view.visualization import Visualizer
 import scipy.interpolate as interp
+import random
+import os
 
 
-def run_qlearning_simulation(visualizer, x_scaled, y_scaled, track_width):
+def train_qlearning_on_multiple_maps(track_list, episodes=50):
+    """
+    Trains a Q-learning agent on multiple tracks by randomly alternating between them each episode.
+
+    Args:
+        track_list (List[Track]): List of Track objects.
+        episodes (int): Number of training episodes.
+
+    Returns:
+        QLearningAgent: Trained agent.
+    """
+    agent = QLearningAgent()
+
+    for episode in range(episodes):
+        # Choose a random track each episode
+        track = random.choice(track_list)
+        env = RacingEnv(track.x, track.y, track.width)
+
+        state = env.reset()
+        done = False
+
+        while not done:
+            action = agent.choose_action(state)
+            next_state, reward, done = env.step(action)
+            agent.learn(state, action, reward, next_state, done)
+            state = next_state
+
+    return agent
+
+def run_qlearning_simulation(visualizer, track, agent):
+    """
+    Runs the trained agent on a given track and visualizes the path.
+    """
+    # Transform track centerline
+    # Combine all x/y for consistent scaling
+    track_x, track_y = track.x, track.y
+    left_x, left_y, right_x, right_y = track.compute_boundaries()
+    all_x = list(track_x) + list(left_x) + list(right_x)
+    all_y = list(track_y) + list(left_y) + list(right_y)
+
+    center_x = visualizer.simulationViewer.map_area_width // 2
+    center_y = visualizer.simulationViewer.HEIGHT // 2
+
+    transform = compute_scaling_and_transform(
+        all_x, all_y,
+        visualizer.simulationViewer.map_area_width,
+        visualizer.simulationViewer.HEIGHT,
+        center_x, center_y,
+        float=True
+    )
+
+    # Transform everything with consistent scale
+    track.x, track.y = zip(*[transform(x, y) for x, y in zip(track_x, track_y)])
+    left_x, left_y = zip(*[transform(x, y) for x, y in zip(left_x, left_y)])
+    right_x, right_y = zip(*[transform(x, y) for x, y in zip(right_x, right_y)])
+
+    env = RacingEnv(track.x, track.y, track.width)
+    visualizer.simulationViewer.current_env = env
+
+    state = env.reset()
+    done = False
+
+    while not done:
+        action = agent.choose_action(state)
+        state, _, done = env.step(action)
+
+    best_x, best_y = env.path_x, env.path_y
+    simple_x, simple_y = simplify_racing_line(best_x, best_y, tolerance=2.0)
+    smooth_x, smooth_y = smooth_path(simple_x, simple_y, smoothing=50)
+    q_x, q_y = clip_path_to_track(smooth_x, smooth_y, left_x, left_y, right_x, right_y)
+
+    # Combine all x/y for consistent scaling
+    all_x = list(q_x) + list(left_x) + list(right_x)
+    all_y = list(q_y) + list(left_y) + list(right_y)
+
+    center_x = visualizer.simulationViewer.map_area_width // 2
+    center_y = visualizer.simulationViewer.HEIGHT // 2
+
+    transform = compute_scaling_and_transform(
+        all_x, all_y,
+        visualizer.simulationViewer.map_area_width,
+        visualizer.simulationViewer.HEIGHT,
+        center_x, center_y,
+        float = True
+    )
+
+    # Apply transform to all
+    scaled_q_x, scaled_q_y = zip(*[transform(x, y) for x, y in zip(q_x, q_y)])
+
+    car = Car(scaled_q_x, scaled_q_y, track.width)
+    visualizer.render_q_agent(track, car, best_line=(scaled_q_x, scaled_q_y))
+
+
+def run_qlearning_simulation1(visualizer, track):
     """
     Trains a Q-learning agent on the current track and visualizes the best path.
     """
-    dx = np.gradient(x_scaled)
-    dy = np.gradient(y_scaled)
-    length = np.sqrt(dx ** 2 + dy ** 2)
-    dx /= np.where(length == 0, 1, length)
-    dy /= np.where(length == 0, 1, length)
+    left_x, left_y, right_x, right_y = track.compute_boundaries()
 
-    left_x = x_scaled + (track_width / 2) * dy
-    left_y = y_scaled - (track_width / 2) * dx
-    right_x = x_scaled - (track_width / 2) * dy
-    right_y = y_scaled + (track_width / 2) * dx
-
-    env = RacingEnv(x_scaled, y_scaled, track_width)
-    visualizer.current_env = env
+    env = RacingEnv(track.x, track.y, track.width)
+    visualizer.simulationViewer.current_env = env
     agent = QLearningAgent()
     best_reward = -float('inf')
     best_path = ([], [])
@@ -49,40 +137,14 @@ def run_qlearning_simulation(visualizer, x_scaled, y_scaled, track_width):
             best_reward = total_reward
             best_path = (env.path_x.copy(), env.path_y.copy())
 
-    print("Qlearning length = " + str(len(best_path[0])))
-    print(len(best_path[0]))
-    print(best_path[0][1])
-
-    # ⚡ Clean the path to ensure floats (not numpy arrays)
     clean_best_x = [float(x) for x in best_path[0]]
     clean_best_y = [float(y) for y in best_path[1]]
-
-    print(f"Length x: {len(clean_best_x)}, Length y: {len(clean_best_y)}")
-    print(f"Sample x: {clean_best_x[:5]}")
-    print(f"Sample y: {clean_best_y[:5]}")
     simple_x, simple_y = simplify_racing_line(clean_best_x, clean_best_y, tolerance=2.0)
     smooth_x, smooth_y = smooth_path(simple_x, simple_y, smoothing=50)
     q_x, q_y = clip_path_to_track(smooth_x, smooth_y, left_x, left_y, right_x, right_y)
 
-    # 🚗 Create car with smooth path
-    car = Car(q_x, q_y, track_width)
-
-    # 🏁 Pass the smoothed path for drawing
-    visualizer.render_q_agent(x_scaled, y_scaled, car, track_width, best_line=(q_x, q_y))
-
-
-
-def smooth_path_q(x, y, smooth_factor=0.01):
-    # Use B-spline smoothing
-    t = np.linspace(0, 1, len(x))
-    spl_x = interp.UnivariateSpline(t, x, s=smooth_factor * len(x))
-    spl_y = interp.UnivariateSpline(t, y, s=smooth_factor * len(y))
-
-    t_fine = np.linspace(0, 1, len(x) * 3)  # More points for finer curve
-    smooth_x = spl_x(t_fine)
-    smooth_y = spl_y(t_fine)
-    return smooth_x.tolist(), smooth_y.tolist()
-
+    car = Car(q_x, q_y, track.width)
+    visualizer.render_q_agent(track, car, best_line=(q_x, q_y))
 
 def smooth_path(x, y, smoothing=100.0, num_points=2000):
     """
@@ -156,42 +218,33 @@ def clip_path_to_track(a_star_x, a_star_y, left_x, left_y, right_x, right_y, smo
     return final_x, final_y
 
 
-def run_astar_simulation(visualizer, x_scaled, y_scaled, track_width):
+def run_astar_simulation(visualizer, track):
     """
     Runs the A* simulation and visualization for the current track layout.
     """
     grid_builder = GridBuilder(visualizer.map_area_width, visualizer.HEIGHT, resolution=4)
 
     # Compute track edges
-    dx = np.gradient(x_scaled)
-    dy = np.gradient(y_scaled)
-    length = np.sqrt(dx ** 2 + dy ** 2)
-    dx /= np.where(length == 0, 1, length)
-    dy /= np.where(length == 0, 1, length)
-
-    left_x = x_scaled + (track_width / 2) * dy
-    left_y = y_scaled - (track_width / 2) * dx
-    right_x = x_scaled - (track_width / 2) * dy
-    right_y = y_scaled + (track_width / 2) * dx
+    left_x, left_y, right_x, right_y = track.compute_boundaries()
 
     grid_builder.mark_obstacles_from_track_edges(left_x, left_y, right_x, right_y)
 
     # Use centerline car for planning only
-    car_planning = Car(x_scaled, y_scaled, track_width)
-    tck, _ = splprep([x_scaled, y_scaled], s=0)
+    car_planning = Car(track.x, track.y, track.width)
+    tck, _ = splprep([track.x, track.y], s=0)
     astar = AStarPlanner(grid_builder, car_planning, tck)
 
-    start_point = (x_scaled[0], y_scaled[0])
+    start_point = (track.x[0], track.y[0])
     mid_point = None
-    for offset in range(len(x_scaled) // 2):
-        i = (len(x_scaled) // 2 + offset) % len(x_scaled)
-        gx, gy = x_scaled[i], y_scaled[i]
+    for offset in range(len(track.x) // 2):
+        i = (len(track.x) // 2 + offset) % len(track.x)
+        gx, gy = track.x[i], track.y[i]
         gx_i, gy_i = grid_builder.world_to_grid(gx, gy)
         if grid_builder.is_valid_cell(gx_i, gy_i):
             mid_point = (gx, gy)
             break
     if mid_point is None:
-        print("❌ No valid midpoint found")
+        print("No valid midpoint found")
         return
 
     path1 = astar.plan(start_point, mid_point)
@@ -210,103 +263,64 @@ def run_astar_simulation(visualizer, x_scaled, y_scaled, track_width):
         a_star_x, a_star_y = smooth_path(a_star_x, a_star_y, smoothing=50.0)
         a_star_x, a_star_y = clip_path_to_track(a_star_x, a_star_y, left_x, left_y, right_x, right_y)
 
-
-        a_star_x_scaled, a_star_y_scaled = visualizer.scale_map_to_left_area(np.array(a_star_x), np.array(a_star_y))
-
-        car_sim = Car(a_star_x, a_star_y, track_width)
-        visualizer.render_astar(x_scaled, y_scaled, car_sim, track_width, (a_star_x, a_star_y))
+        car_sim = Car(a_star_x, a_star_y, track.width)
+        visualizer.render_astar(track, car_sim, (a_star_x, a_star_y))
     else:
-        print("⚠️ A* failed to build full loop path")
+        print("A* failed to build full loop path")
 
-def generate_map_preview(visualizer):
+def run_and_save_qlearning_path(track, save_path, trained_agent):
     """
-    Generates and displays a new map preview.
+    Uses a trained Q-learning agent to generate the best path on a given track and saves it to a file.
+
+    Args:
+        track (Track): The track on which to evaluate the agent.
+        save_path (str): Path to save the computed best path.
+        trained_agent (QLearningAgent): The already trained agent to use.
     """
-    track = Track()
-    x_spline, y_spline, track_width = track.generate_map()
-    x_scaled, y_scaled = visualizer.scale_map_to_left_area(x_spline, y_spline)
-    visualizer.preview_map(x_scaled, y_scaled, track_width)
+    left_x, left_y, right_x, right_y = track.compute_boundaries()
 
-def run_and_save_qlearning_path(x_scaled, y_scaled, track_width, save_path):
-    """
-    Trains Q-learning and saves the best path to a file.
-    """
-    dx = np.gradient(x_scaled)
-    dy = np.gradient(y_scaled)
-    length = np.sqrt(dx ** 2 + dy ** 2)
-    dx /= np.where(length == 0, 1, length)
-    dy /= np.where(length == 0, 1, length)
+    env = RacingEnv(track.x, track.y, track.width)
+    state = env.reset()
+    done = False
 
-    left_x = x_scaled + (track_width / 2) * dy
-    left_y = y_scaled - (track_width / 2) * dx
-    right_x = x_scaled - (track_width / 2) * dy
-    right_y = y_scaled + (track_width / 2) * dx
+    while not done:
+        action = trained_agent.choose_action(state)
+        state, _, done = env.step(action)
 
-    env = RacingEnv(x_scaled, y_scaled, track_width)
-    agent = QLearningAgent()
-    best_reward = -float('inf')
-    best_path = ([], [])
+    best_x, best_y = env.path_x, env.path_y
 
-    for episode in range(1500):
-        state = env.reset()
-        done = False
-        total_reward = 0
-        while not done:
-            action = agent.choose_action(state)
-            next_state, reward, done = env.step(action)
-            agent.learn(state, action, reward, next_state, done)
-            state = next_state
-            total_reward += reward
-
-        if total_reward > best_reward:
-            best_reward = total_reward
-            best_path = (env.path_x.copy(), env.path_y.copy())
-
-    clean_best_x = [float(x) for x in best_path[0]]
-    clean_best_y = [float(y) for y in best_path[1]]
-
-    simple_x, simple_y = simplify_racing_line(clean_best_x, clean_best_y, tolerance=2.0)
+    # Post-process the path
+    simple_x, simple_y = simplify_racing_line(best_x, best_y, tolerance=2.0)
     smooth_x, smooth_y = smooth_path(simple_x, simple_y, smoothing=50)
     q_x, q_y = clip_path_to_track(smooth_x, smooth_y, left_x, left_y, right_x, right_y)
 
     np.savez(save_path, x=q_x, y=q_y)
-    print(f"✅ Q-learning path saved to {save_path}")
+    print(f"Q-learning path saved to {save_path}")
 
-
-def run_and_save_astar_path(x_scaled, y_scaled, track_width, save_path, visualizer=None):
+def run_and_save_astar_path(track, save_path):
     """
     Runs A* planning and saves the smoothed path to a file.
     """
-    grid_builder = GridBuilder(visualizer.map_area_width if visualizer else 850, 700, resolution=4)
+    grid_builder = GridBuilder(850, 700, resolution=4)
 
-    dx = np.gradient(x_scaled)
-    dy = np.gradient(y_scaled)
-    length = np.sqrt(dx ** 2 + dy ** 2)
-    dx /= np.where(length == 0, 1, length)
-    dy /= np.where(length == 0, 1, length)
-
-    left_x = x_scaled + (track_width / 2) * dy
-    left_y = y_scaled - (track_width / 2) * dx
-    right_x = x_scaled - (track_width / 2) * dy
-    right_y = y_scaled + (track_width / 2) * dx
-
+    left_x, left_y, right_x, right_y = track.compute_boundaries()
     grid_builder.mark_obstacles_from_track_edges(left_x, left_y, right_x, right_y)
 
-    car = Car(x_scaled, y_scaled, track_width)
-    tck, _ = splprep([x_scaled, y_scaled], s=0)
+    car = Car(track.x, track.y, track.width)
+    tck, _ = splprep([track.x, track.y], s=0)
     astar = AStarPlanner(grid_builder, car, tck)
 
-    start_point = (x_scaled[0], y_scaled[0])
+    start_point = (track.x[0], track.y[0])
     mid_point = None
-    for offset in range(len(x_scaled) // 2):
-        i = (len(x_scaled) // 2 + offset) % len(x_scaled)
-        gx, gy = x_scaled[i], y_scaled[i]
+    for offset in range(len(track.x) // 2):
+        i = (len(track.x) // 2 + offset) % len(track.x)
+        gx, gy = track.x[i], track.y[i]
         gx_i, gy_i = grid_builder.world_to_grid(gx, gy)
         if grid_builder.is_valid_cell(gx_i, gy_i):
             mid_point = (gx, gy)
             break
     if mid_point is None:
-        print("❌ No valid midpoint found for A*")
+        print("No valid midpoint found for A*")
         return
 
     path1 = astar.plan(start_point, mid_point)
@@ -326,23 +340,15 @@ def run_and_save_astar_path(x_scaled, y_scaled, track_width, save_path, visualiz
         a_star_x, a_star_y = clip_path_to_track(a_star_x, a_star_y, left_x, left_y, right_x, right_y)
 
         np.savez(save_path, x=a_star_x, y=a_star_y)
-        print(f"✅ A* path saved to {save_path}")
+        print(f"A* path saved to {save_path}")
     else:
-        print("⚠️ A* path was not valid and was not saved.")
+        print("A* path was not valid and was not saved.")
 
-
-import os
-import numpy as np
-
-def process_all_demo_maps(demo_dir, visualizer):
-    """
-    Processes all .npz maps in a directory by training Q-learning and A* paths,
-    then saves those paths as <mapname>_q.npz and <mapname>_astar.npz.
-    """
+def process_all_demo_maps(demo_dir, visualizer, trained_agent):
     demo_files = [f for f in os.listdir(demo_dir) if f.endswith(".npz") and not f.endswith(("_q.npz", "_astar.npz"))]
 
     if not demo_files:
-        print("❌ No demo maps found in the folder.")
+        print("No demo maps found in the folder.")
         return
 
     for filename in demo_files:
@@ -352,49 +358,70 @@ def process_all_demo_maps(demo_dir, visualizer):
         try:
             data = np.load(full_path)
             x, y, width = data["x"], data["y"], data["track_width"]
+            track = Track(custom_x=x, custom_y=y, custom_width=width)
         except Exception as e:
-            print(f"⚠️ Could not load map {filename}: {e}")
+            print(f"Could not load map {filename}: {e}")
             continue
 
-        print(f"\n▶️ Processing map: {filename}")
+        print(f"\nProcessing map: {filename}")
 
         q_path = os.path.join(demo_dir, "paths", f"{base_name}_q.npz")
-        run_and_save_qlearning_path(x, y, width, q_path)
+        run_and_save_qlearning_path(track, q_path, trained_agent)
 
         astar_path = os.path.join(demo_dir, "paths", f"{base_name}_astar.npz")
-        run_and_save_astar_path(x, y, width, astar_path, visualizer)
+        run_and_save_astar_path(track, astar_path)
 
-    print("\n✅ All maps processed and saved.")
+    print("\nAll maps processed and saved.")
+
+
 
 def main():
-    """
-    Application entry point for running the simulator.
-    """
     pygame.init()
     visualizer = Visualizer()
     running = True
-    #process_all_demo_maps("/home/priut/Documents/disertatie/RaceLineOptimization/demo_maps", visualizer)
+
+    agent_path = "trained_agent.pkl"
+    trained_agent = None
+
+    # Load trained agent if it exists
+    if os.path.exists(agent_path):
+        trained_agent = QLearningAgent.load(agent_path)
+        print("[INFO] Loaded trained agent from disk.")
+    else:
+        print("[INFO] Training new agent...")
+        training_tracks = [Track() for _ in range(20)]
+        trained_agent = train_qlearning_on_multiple_maps(training_tracks, episodes=2000)
+        trained_agent.save(agent_path)
+        print(f"[INFO] Agent trained and saved to {agent_path}.")
+
+    demo_dir = "/home/priut/Documents/disertatie/RaceLineOptimization/demo_maps"
+    #process_all_demo_maps(demo_dir, visualizer, trained_agent)
 
     while running:
         choice = visualizer.show_main_menu()
+
         if choice == "generate_map":
-            generate_map_preview(visualizer)
+            track = Track()
+            visualizer.preview_map(track)
+
         elif choice == "simulate":
             while True:
                 sim_choice = visualizer.show_simulation_menu()
-                track = Track()
-                x_spline, y_spline, track_width = track.generate_map()
-                x_scaled, y_scaled = visualizer.scale_map_to_left_area(x_spline, y_spline)
 
                 if sim_choice == "qlearning_agent":
-                    visualizer.show_loading_screen(x_scaled, y_scaled, track_width, "Training AI... Please wait")
-                    run_qlearning_simulation(visualizer, x_scaled, y_scaled, track_width)
+                    eval_track = Track()
+                    run_qlearning_simulation(visualizer, eval_track, trained_agent)
+
                 elif sim_choice == "a*":
-                    visualizer.show_loading_screen(x_scaled, y_scaled, track_width, "Finding A* Path... Please wait")
-                    run_astar_simulation(visualizer, x_scaled, y_scaled, track_width)
+                    track = Track()
+                    visualizer.show_loading_screen(track, "Finding A* Path... Please wait")
+                    run_astar_simulation(visualizer, track)
+
                 elif sim_choice == "back_to_main_menu":
                     break
+
         elif choice == "demo":
             visualizer.show_demo_preview()
 
     pygame.quit()
+

@@ -9,18 +9,30 @@ class Track:
     Includes self-intersection checks and curvature constraints to ensure drivability.
     """
 
-    def __init__(self, num_initial_points=20, displacement_scale=15, distance_threshold=5, track_width=20):
+    def __init__(self, num_initial_points=20, displacement_scale=15, distance_threshold=5, track_width=20,
+                 custom_x=None, custom_y=None, custom_width=None):
         """
-        Initializes track generation parameters.
-        - num_initial_points: number of seed points for the track
-        - displacement_scale: scale of random displacement for variation
-        - distance_threshold: minimum spacing between refined points
-        - track_width: width of the generated track (used for car constraints)
+        Initializes track generation parameters and immediately generates a track.
+        Can also be initialized with pre-defined track coordinates and width.
+        - num_initial_points: number of seed points for the track (if generating)
+        - displacement_scale: scale of random displacement for variation (if generating)
+        - distance_threshold: minimum spacing between refined points (if generating)
+        - track_width: width of the generated track (if generating) or the custom track
+        - custom_x: array of x-coordinates for a pre-defined track
+        - custom_y: array of y-coordinates for a pre-defined track
+        - custom_width: width of the pre-defined track
         """
         self.num_initial_points = num_initial_points
         self.displacement_scale = displacement_scale
         self.distance_threshold = distance_threshold
         self.track_width = track_width
+
+        if custom_x is not None and custom_y is not None and custom_width is not None:
+            self.x = np.array(custom_x)
+            self.y = np.array(custom_y)
+            self.width = custom_width
+        else:
+            self.x, self.y, self.width = self.generate_map()
 
     @staticmethod
     def generate_random_points(num_points, scale=100):
@@ -141,3 +153,34 @@ class Track:
 
         print("Failed to generate a valid track after 10 attempts.")
         return x_spline, y_spline, self.track_width
+
+    def scale_map_to_left_area(self, map_area_width, HEIGHT, margin=50):
+        drawable_width = map_area_width - 2 * margin
+        drawable_height = HEIGHT - 2 * margin
+        self.x = (self.x - np.min(self.x)) / (np.max(self.x) - np.min(self.x)) * drawable_width + margin
+        self.y = (self.y - np.min(self.y)) / (np.max(self.y) - np.min(self.y)) * drawable_height + margin
+        self.x += margin // 2
+        return self.x, self.y
+
+    def compute_boundaries(self):
+        dx = np.gradient(self.x)
+        dy = np.gradient(self.y)
+        length = np.hypot(dx, dy)
+        length[length == 0] = 1
+        dx /= length
+        dy /= length
+
+        left_x = self.x + (self.width / 2) * dy
+        left_y = self.y - (self.width / 2) * dx
+        right_x = self.x - (self.width / 2) * dy
+        right_y = self.y + (self.width / 2) * dx
+        return left_x, left_y, right_x, right_y
+
+if __name__ == '__main__':
+    # Example of using the Track class to generate and access track data
+    track_generator = Track(num_initial_points=15, displacement_scale=20, track_width=25)
+    track_x = track_generator.x
+    track_y = track_generator.y
+    track_width = track_generator.width
+
+    print(f"Generated track with {len(track_x)} points.")

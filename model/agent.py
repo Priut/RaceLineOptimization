@@ -1,6 +1,7 @@
 import numpy as np
 import random
 from collections import defaultdict
+import pickle
 
 class QLearningAgent:
     """
@@ -32,7 +33,10 @@ class QLearningAgent:
         self.actions = [-0.5, -0.3, -0.15, 0.0, 0.15, 0.3, 0.5]
 
         # Q-table with default value 0.0 for all actions in unseen states
-        self.q_table = defaultdict(lambda: {a: 0.0 for a in self.actions})
+        self.q_table = defaultdict(self._q_value_initializer)
+
+    def _q_value_initializer(self):
+        return {a: 0.0 for a in self.actions}
 
     def _discretize_state(self, state):
         """
@@ -91,3 +95,12 @@ class QLearningAgent:
             # Decay epsilon and learning rate at end of episode
             self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
             self.alpha = max(self.alpha * 0.99, 0.01)
+
+    def save(self, filepath):
+        with open(filepath, 'wb') as f:
+            pickle.dump(self, f)
+
+    @staticmethod
+    def load(filepath):
+        with open(filepath, 'rb') as f:
+            return pickle.load(f)
