@@ -7,17 +7,15 @@ from model.path_planning.node import Node
 
 class AStarPlanner:
     """
-    A* path planner customized for racing applications.
+    A* path planner.
     Considers physical constraints and racing objectives:
     - Time-optimal movement based on curvature and car dynamics
     - Clockwise direction bias
     - Alignment with centerline (heading angle)
     - Proximity to centerline (lateral offset)
-
-    Logs detailed cost components to CSV for coefficient tuning.
     """
 
-    def __init__(self, grid_builder, sim_car, center_spline=None):
+    def __init__(self, grid_builder, sim_car, center_spline=None, logging=False):
         """
         Parameters:
             grid_builder (GridBuilder): Map with obstacle grid and resolution
@@ -30,11 +28,14 @@ class AStarPlanner:
         self.rows = grid_builder.rows
         self.sim_car = sim_car
         self.center_spline = center_spline
+        self.nodes_expanded = 0
+        self.logging=logging
         self.log_file = "astar_cost_log.csv"
 
         # Log header for debugging and tuning
-        with open(self.log_file, "w") as f:
-            f.write("from_x,from_y,to_x,to_y,time_cost,direction_penalty,angle_penalty,lateral_penalty,total_cost\n")
+        if self.logging:
+            with open(self.log_file, "w") as f:
+                f.write("from_x,from_y,to_x,to_y,time_cost,direction_penalty,angle_penalty,lateral_penalty,total_cost\n")
 
     def heuristic(self, node, goal):
         """Euclidean distance heuristic."""
@@ -82,10 +83,10 @@ class AStarPlanner:
 
         # Compute speed and time
         max_speed = self.sim_car.compute_max_lateral_speed(radius)
-        max_speed = max(1.0, min(max_speed, 40.0))  # Clamp values
+        max_speed = max(1.0, min(max_speed, 40.0))
         time_cost = distance / max_speed
 
-        # Penalize counter-clockwise motion (based on vector cross product)
+        # Penalize counter-clockwise motion
         cx, cy = self.cols // 2, self.rows // 2
         vec_from = [from_node.x - cx, from_node.y - cy]
         vec_to = [to_node.x - cx, to_node.y - cy]
@@ -119,7 +120,7 @@ class AStarPlanner:
             dist_to_centerline = np.linalg.norm(np.array([wx, wy]) - center_pos)
             lateral_penalty = dist_to_centerline
 
-        # Final cost (weights can be tuned)
+        # Final cost
         angle_weight = 1
         lateral_weight = 1
         direction_weight = 100
@@ -128,11 +129,11 @@ class AStarPlanner:
                       angle_weight * angle_penalty +
                       lateral_weight * lateral_penalty)
 
-        # Log for analysis
-        with open(self.log_file, "a") as f:
-            f.write(f"{from_node.x},{from_node.y},{to_node.x},{to_node.y},"
-                    f"{time_cost:.4f},{direction_penalty:.4f},{angle_penalty:.4f},"
-                    f"{lateral_penalty:.4f},{total_cost:.4f}\n")
+        if self.logging:
+            with open(self.log_file, "a") as f:
+                f.write(f"{from_node.x},{from_node.y},{to_node.x},{to_node.y},"
+                        f"{time_cost:.4f},{direction_penalty:.4f},{angle_penalty:.4f},"
+                        f"{lateral_penalty:.4f},{total_cost:.4f}\n")
 
         return total_cost
 
@@ -173,16 +174,14 @@ class AStarPlanner:
             current = current.parent
         return path[::-1]
 
-    def plan(self, start_world, goal_world=None, loop_threshold=100):
+    def plan(self, start_world, goal_world, loop_threshold=100):
         """
         A* path planning loop.
-        If `goal_world` is None, find a looped path returning to start after `loop_threshold` cost.
         """
         start_x, start_y = self.grid_builder.world_to_grid(*start_world)
         start = Node(start_x, start_y, g=0)
 
-        loop_mode = goal_world is None
-        goal_x, goal_y = (start_x, start_y) if loop_mode else self.grid_builder.world_to_grid(*goal_world)
+        goal_x, goal_y = self.grid_builder.world_to_grid(*goal_world)
         goal = Node(goal_x, goal_y)
 
         open_set = []
@@ -194,11 +193,10 @@ class AStarPlanner:
 
         while open_set and max_iterations > 0:
             _, current = heapq.heappop(open_set)
+            self.nodes_expanded += 1
             visited.add((current.x, current.y))
 
-            if loop_mode and (current.x, current.y) == (start.x, start.y) and current.g > loop_threshold:
-                return self.reconstruct_path(current)
-            elif not loop_mode and (current.x, current.y) == (goal.x, goal.y):
+            if (current.x, current.y) == (goal.x, goal.y):
                 return self.reconstruct_path(current)
 
             for nx, ny in self.get_neighbors(current):
@@ -219,5 +217,5 @@ class AStarPlanner:
 
             max_iterations -= 1
 
-        print("❌ A* failed to reach goal or complete loop")
+        print("A* failed to reach goal or complete loop")
         return None

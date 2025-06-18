@@ -5,7 +5,7 @@ from shapely.geometry import LineString
 
 class Track:
     """
-    Generates smooth, closed racing tracks with spline interpolation and randomness.
+    Generates smooth, closed racing tracks with spline interpolation.
     Includes self-intersection checks and curvature constraints to ensure drivability.
     """
 
@@ -14,6 +14,7 @@ class Track:
         """
         Initializes track generation parameters and immediately generates a track.
         Can also be initialized with pre-defined track coordinates and width.
+        Parameters:
         - num_initial_points: number of seed points for the track (if generating)
         - displacement_scale: scale of random displacement for variation (if generating)
         - distance_threshold: minimum spacing between refined points (if generating)
@@ -78,18 +79,6 @@ class Track:
         return np.array(new_points)
 
     @staticmethod
-    def refine_points(points, distance_threshold=5):
-        """
-        Removes points that are too close to each other to avoid jittery splines.
-        Keeps only those spaced at least `distance_threshold` apart.
-        """
-        refined_points = [points[0]]
-        for i in range(1, len(points)):
-            if np.linalg.norm(points[i] - refined_points[-1]) > distance_threshold:
-                refined_points.append(points[i])
-        return np.array(refined_points)
-
-    @staticmethod
     def create_spline(points, smoothing=0):
         """
         Interpolates a smooth closed spline through a set of points.
@@ -112,8 +101,7 @@ class Track:
     @staticmethod
     def is_curve_too_tight(x, y, min_radius=10):
         """
-        Checks whether any part of the track has curvature too tight (below `min_radius`).
-        Prevents creating sharp corners that are undrivable.
+        Checks whether any part of the track has curvature below `min_radius`.
         """
         if len(x) < 3:
             return False
@@ -123,7 +111,7 @@ class Track:
         ddx = np.gradient(dx)
         ddy = np.gradient(dy)
 
-        curvature = np.abs(dx * ddy - dy * ddx) / (dx ** 2 + dy ** 2 + 1e-5) ** 1.5
+        curvature = np.abs(dx * ddy - dy * ddx) / (dx ** 2 + dy ** 2 + 1e-8) ** 1.5
         with np.errstate(divide='ignore'):
             radius = 1.0 / (curvature + 1e-8)
 
@@ -155,6 +143,12 @@ class Track:
         return x_spline, y_spline, self.track_width
 
     def scale_map_to_left_area(self, map_area_width, HEIGHT, margin=50):
+        """
+            Scales and translates the track to fit within the left portion of the rendering area.
+
+            Returns:
+                tuple: The rescaled x and y coordinates of the track centerline.
+            """
         drawable_width = map_area_width - 2 * margin
         drawable_height = HEIGHT - 2 * margin
         self.x = (self.x - np.min(self.x)) / (np.max(self.x) - np.min(self.x)) * drawable_width + margin
@@ -163,6 +157,13 @@ class Track:
         return self.x, self.y
 
     def compute_boundaries(self):
+        """
+        Computes the left and right boundaries of the track based on the centerline and width.
+
+        Returns:
+            tuple: Four numpy arrays representing the x and y coordinates of the left and right boundaries:
+                (left_x, left_y, right_x, right_y)
+        """
         dx = np.gradient(self.x)
         dy = np.gradient(self.y)
         length = np.hypot(dx, dy)
@@ -175,12 +176,3 @@ class Track:
         right_x = self.x - (self.width / 2) * dy
         right_y = self.y + (self.width / 2) * dx
         return left_x, left_y, right_x, right_y
-
-if __name__ == '__main__':
-    # Example of using the Track class to generate and access track data
-    track_generator = Track(num_initial_points=15, displacement_scale=20, track_width=25)
-    track_x = track_generator.x
-    track_y = track_generator.y
-    track_width = track_generator.width
-
-    print(f"Generated track with {len(track_x)} points.")

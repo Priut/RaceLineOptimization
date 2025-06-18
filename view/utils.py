@@ -1,6 +1,11 @@
 import numpy as np
 
 def compute_scaling_and_transform(all_x, all_y, target_width, target_height, center_x, center_y, float = False):
+    """
+    Computes a coordinate transformation function to scale and center a set of 2D points.
+    Returns:
+        function: A `transform(px, py)` function that maps input coordinates into scaled and centered screen space.
+    """
     scale_x = target_width / (np.max(all_x) - np.min(all_x) + 1e-5)
     scale_y = target_height / (np.max(all_y) - np.min(all_y) + 1e-5)
     scale = min(scale_x, scale_y)

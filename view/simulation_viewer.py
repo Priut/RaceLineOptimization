@@ -5,11 +5,18 @@ import pygame
 from model.car import Car
 from model.track import Track
 from view.map_previewer import MapPreviewer
-from view.colors import TRACK_GREEN, TRACK_LINE, CAR_COLOR, SIDEBAR_BG, TEXT_COLOR, MAP_BG, ASTAR_LINE, BACK_BUTTON_COLOR
+from view.colors import TRACK_GREEN, TRACK_LINE, CAR_COLOR, SIDEBAR_BG, TEXT_COLOR, MAP_BG, ASTAR_LINE, \
+    BACK_BUTTON_COLOR, BUTTON_COLOR, CONTRAST_TEXT_COLOR
 
 
 class SimulationViewer:
+    """
+    Displays the racing simulation for a vehicle following a given path.
+    Renders the track, car movement, telemetry, and lap summary.
+    Allows replaying the simulation or returning to the main menu.
+    """
     def __init__(self, screen, font, width, height, map_area_width, clock):
+        """Initializes the viewer with the display surface, font, dimensions, sidebar width, and clock for frame timing."""
         self.screen = screen
         self.font = font
         self.WIDTH = width
@@ -18,6 +25,13 @@ class SimulationViewer:
         self.clock = clock
 
     def render_loop(self, track, car, best_line=None, grid_builder=None):
+        """
+        Main simulation loop.
+        Renders the track, optional grid, and optional best path.
+        Animates the car using physics-based motion.
+        Displays a live telemetry sidebar and a lap summary once the car finishes.
+        Offers buttons for replaying the simulation or returning to the main menu.
+        """
         map_area_width = self.map_area_width
         sidebar_width = self.WIDTH - map_area_width
         steps = 0
@@ -66,7 +80,7 @@ class SimulationViewer:
             if car_finished and summary_shown:
                 # Draw Replay button
                 replay_btn_rect = pygame.Rect(map_area_width + 25, 380, sidebar_width - 50, 50)
-                pygame.draw.rect(self.screen, (100, 100, 200), replay_btn_rect)
+                pygame.draw.rect(self.screen, BUTTON_COLOR, replay_btn_rect)
                 replay_text = self.font.render("Replay", True, TEXT_COLOR)
                 replay_text_rect = replay_text.get_rect(center=replay_btn_rect.center)
                 self.screen.blit(replay_text, replay_text_rect)
@@ -74,7 +88,7 @@ class SimulationViewer:
                 # Draw Back to Main Menu button
                 back_btn_rect = pygame.Rect(map_area_width + 25, 630, sidebar_width - 50, 50)
                 pygame.draw.rect(self.screen, BACK_BUTTON_COLOR, back_btn_rect)
-                back_text = self.font.render("Back to Main Menu", True, TEXT_COLOR)
+                back_text = self.font.render("Back to Main Menu", True, CONTRAST_TEXT_COLOR)
                 back_text_rect = back_text.get_rect(center=back_btn_rect.center)
                 self.screen.blit(back_text, back_text_rect)
 
@@ -87,12 +101,13 @@ class SimulationViewer:
                             exit()
                         if event.type == pygame.MOUSEBUTTONDOWN:
                             if replay_btn_rect.collidepoint(event.pos):
-                                return self._render_loop(track_x, track_y, Car(car.car_x, car.car_y, track_width),
-                                                         track_width, best_line)
+                                return self.render_loop(track, Car(car.car_x, car.car_y, track.width), best_line)
                             elif back_btn_rect.collidepoint(event.pos):
-                                return  # Just exit back to the main menu
+                                return None
 
     def _draw_track(self, track):
+        """Renders the full track, including left and right boundaries.
+        If current_env.point_behaviors exists, colors are applied accordingly."""
         left_x, left_y, right_x, right_y = track.compute_boundaries()
 
         track_polygon = list(zip(left_x, left_y)) + list(zip(reversed(right_x), reversed(right_y)))
@@ -128,6 +143,7 @@ class SimulationViewer:
         return np.gradient(track.x), np.gradient(track.y)
 
     def _draw_sidebar(self, car, map_area_width):
+        """Displays telemetry data such as:current speed (km/h), local curvature radius (m), max speed reached (km/h)"""
         sidebar_title = self.font.render("Telemetry", True, TEXT_COLOR)
         self.screen.blit(sidebar_title, (map_area_width + 30, 40))
         pygame.draw.line(self.screen, (80, 80, 100), (map_area_width + 20, 65), (self.WIDTH - 20, 65), 2)
@@ -148,6 +164,7 @@ class SimulationViewer:
             self.screen.blit(text, (map_area_width + 40, 90 + i * 30))
 
     def _draw_lap_summary(self, car, start_ticks, map_area_width):
+        """Displays a lap summary once the car finishes: total time, distance (km), average speed (km/h)"""
         sim_time = (pygame.time.get_ticks() - start_ticks) / 1000.0
         real_time_sec = sim_time
         distance_km = car.distance_traveled / 1000  # meters to km

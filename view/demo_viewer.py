@@ -5,12 +5,19 @@ import pygame
 from model.car import Car
 from model.track import Track
 from view.map_previewer import MapPreviewer
-from view.colors import TRACK_GREEN, TRACK_LINE, CAR_COLOR, SIDEBAR_BG, TEXT_COLOR, MAP_BG, ASTAR_LINE, BACK_BUTTON_COLOR
+from view.colors import TRACK_GREEN, TRACK_LINE, CAR_COLOR, SIDEBAR_BG, TEXT_COLOR, MAP_BG, ASTAR_LINE, \
+    BACK_BUTTON_COLOR, CONTRAST_TEXT_COLOR
 import view.utils as utils
 
 
 class DemoViewer:
+    """
+    Handles the visual presentation and simulation of demo tracks in a grid interface.
+    Allows users to preview predefined racing maps and run Q-learning and A* path-following simulations,
+    displaying performance metrics in real time.
+    """
     def __init__(self, screen, font, width, height, map_area_width):
+        """Initializes the viewer with the Pygame screen, font, layout dimensions, and sidebar width."""
         self.screen = screen
         self.font = font
         self.WIDTH = width
@@ -20,7 +27,12 @@ class DemoViewer:
 
 
     def display_map_grid(self, map_data_list, filenames):
-        self.screen.fill((30, 30, 30))
+        """
+        Displays up to four demo maps in a 2x2 grid.
+        Each map is clickable; selecting one returns the corresponding filename.
+        Includes a "Back" button to return to the previous screen.
+        """
+        self.screen.fill(MAP_BG)
         grid_rows, grid_cols = 2, 2
         cell_w = self.WIDTH // grid_cols
         cell_h = self.HEIGHT // grid_rows
@@ -66,7 +78,10 @@ class DemoViewer:
                             return filenames[i]
 
     def run_demo_with_paths(self, map_filename):
-        base_directory = "/home/priut/Documents/disertatie/RaceLineOptimization"
+        """
+        Loads a demo map and its associated Q-learning and A* paths (if available), then launches the visual demo simulation view.
+        """
+        base_directory = "/home/priut/Documents/disertatie/RaceLineOptimization/"
         map_path = map_filename  # already full path now
         base_name = os.path.splitext(os.path.basename(map_filename))[0]
         path_dir = os.path.join(base_directory, "demo_maps", "paths")
@@ -88,6 +103,12 @@ class DemoViewer:
         self.render_demo_paths(track, car, q_path=q_path, astar_path=astar_path)
 
     def render_demo_paths(self, track, car, q_path=None, astar_path=None):
+        """
+        Main interactive view for demo simulations.
+        Displays the track and overlays the Q-learning and A* paths.
+        Includes buttons to toggle visibility and start path-following simulations.
+        Displays real-time and final statistics (max speed, average speed, time, and path length).
+        """
         show_q = True
         show_astar = True
 
@@ -166,7 +187,7 @@ class DemoViewer:
             self.draw_text_centered("Toggle A*", button_astar)
             self.draw_text_centered("Simulate Q-Learning", button_sim_q)
             self.draw_text_centered("Simulate A*", button_sim_astar)
-            self.draw_text_centered("Back to Menu", button_back)
+            self.draw_text_centered("Back to Menu", button_back, color=CONTRAST_TEXT_COLOR)
 
             # Track
             track_poly = list(zip(left_x, left_y)) + list(zip(reversed(right_x), reversed(right_y)))
@@ -290,16 +311,22 @@ class DemoViewer:
                         return
 
     def draw_text_centered(self, text, rect, color=TEXT_COLOR):
+        """Draws text centered within a given pygame.Rect."""
         text_surface = self.font.render(text, True, color)
         text_rect = text_surface.get_rect(center=rect.center)
         self.screen.blit(text_surface, text_rect)
 
     def show_demo_preview(self):
+        """
+        Searches the demo_maps directory for valid .npz demo files (excluding Q/A* files),
+        loads the first four, and displays them in a grid.
+        Upon selection, the corresponding demo simulation is run.
+        """
         demo_dir = "/home/priut/Documents/disertatie/RaceLineOptimization/demo_maps"
         map_files = sorted([
             f for f in os.listdir(demo_dir)
             if f.endswith(".npz") and not f.endswith("_q.npz") and not f.endswith("_astar.npz")
-        ])[:4]  # Limit to 4
+        ])[:4]
 
         if not map_files:
             print("No demo maps found.")

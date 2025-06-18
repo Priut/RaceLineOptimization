@@ -29,7 +29,7 @@ class QLearningAgent:
         self.epsilon_decay = epsilon_decay
         self.epsilon_min = epsilon_min
 
-        # Fine-grained steering control actions (from hard left to hard right)
+        # Steering control actions (from hard left to hard right)
         self.actions = [-0.5, -0.3, -0.15, 0.0, 0.15, 0.3, 0.5]
 
         # Q-table with default value 0.0 for all actions in unseen states
@@ -44,16 +44,16 @@ class QLearningAgent:
         """
         normalized_pos, norm_offset, offset_velocity, steering_angle, curvature_now, curvature_5, curvature_10 = state
 
-        # Discretize progress along the track (0 to 9)
+        # Discretize progress along the track
         pos_bin = np.clip(int(normalized_pos * 10), 0, 9)
 
-        # Discretize lateral offset (-1 to 1 mapped into bins)
+        # Discretize lateral offset
         offset_bin = np.clip(int((norm_offset + 1.0) * (self.offset_bins / 2)), 0, self.offset_bins - 1)
 
-        # Discretize steering angle (-0.5 to 0.5)
+        # Discretize steering angle
         steering_bin = np.clip(int((steering_angle + 0.5) * 5), 0, 5)
 
-        # Discretize curvature values (scaled for precision)
+        # Discretize curvature values
         curv_scale = 20.0
         curvature_now_bin = int(np.clip(curvature_now * curv_scale, 0, self.curvature_bins - 1))
         curvature_5_bin = int(np.clip(curvature_5 * curv_scale, 0, self.curvature_bins - 1))

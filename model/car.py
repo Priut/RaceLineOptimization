@@ -47,10 +47,10 @@ class Car:
         Computes longitudinal acceleration based on throttle, drag, and rolling resistance.
         """
         if self.throttle < 0:  # Braking
-            brake_force = abs(self.throttle) * self.mass * self.g * 0.6  # assume 0.6g decel
+            brake_force = abs(self.throttle) * self.mass * self.g * 0.6
             self.acceleration = -brake_force / self.mass
         else:  # Accelerating
-            effective_speed = max(self.speed, 1.0)  # avoid division by zero
+            effective_speed = max(self.speed, 1.0)
             engine_force = (self.engine_power * self.transmission_efficiency) / effective_speed
             drag_force = 0.5 * self.Cd * self.rho * self.A * self.speed ** 2
             rolling_force = self.Cr * self.mass * self.g
@@ -103,7 +103,7 @@ class Car:
         target_throttle = np.clip(target_throttle, -1.0, 1.0)
 
         # Smooth throttle transition
-        throttle_response = 2.0  # responsiveness factor
+        throttle_response = 2.0
         if self.throttle < target_throttle:
             self.throttle += throttle_response * dt
         elif self.throttle > target_throttle:

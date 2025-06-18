@@ -3,22 +3,14 @@ import pygame
 import tkinter as tk
 from tkinter import filedialog
 from model.track import Track
-from view.colors import MAP_BG, SIDEBAR_BG, TRACK_GREEN, TRACK_LINE, TEXT_COLOR, BUTTON_COLOR, BACK_BUTTON_COLOR
+from view.colors import MAP_BG, SIDEBAR_BG, TRACK_GREEN, TRACK_LINE, TEXT_COLOR, BUTTON_COLOR, BACK_BUTTON_COLOR, \
+    CONTRAST_TEXT_COLOR
+
 
 class MapPreviewer:
     """
     Provides a Pygame-based interface for previewing, saving, and regenerating race tracks.
-
-    Attributes:
-        screen: The Pygame surface to draw on.
-        font: The Pygame font for rendering text.
-        clock: The Pygame clock to regulate framerate.
-        WIDTH: Width of the screen.
-        HEIGHT: Height of the screen.
-        map_area_width: Width allocated for the map.
-        sidebar_width: Width allocated for the sidebar.
     """
-
     def __init__(self, screen, font, clock, width=1200, height=700):
         self.screen = screen
         self.font = font
@@ -38,16 +30,11 @@ class MapPreviewer:
     def preview_map(self, visualizer, track):
         """
         Displays the map and UI for previewing, regenerating, or saving the track.
-
-        Args:
-            visualizer: Not used directly but passed for consistency with UI manager.
-            x, y: Centerline of the track.
-            track_width: Width of the racing track.
         """
-        def draw_button(label, y_pos, color=BUTTON_COLOR):
+        def draw_button(label, y_pos, btncolor=BUTTON_COLOR, txtcolor=TEXT_COLOR):
             btn_rect = pygame.Rect(self.map_area_width + 20, y_pos, self.sidebar_width - 40, 50)
-            pygame.draw.rect(self.screen, color, btn_rect)
-            text = self.font.render(label, True, TEXT_COLOR)
+            pygame.draw.rect(self.screen, btncolor, btn_rect)
+            text = self.font.render(label, True, txtcolor)
             text_rect = text.get_rect(center=btn_rect.center)
             self.screen.blit(text, text_rect)
             return btn_rect
@@ -91,7 +78,7 @@ class MapPreviewer:
             # Sidebar buttons
             regenerate_btn = draw_button("Regenerate", 200)
             save_btn = draw_button("Save", 270)
-            back_btn = draw_button("Back to Menu", self.HEIGHT - 60, BACK_BUTTON_COLOR)
+            back_btn = draw_button("Back to Menu", self.HEIGHT - 60, BACK_BUTTON_COLOR, CONTRAST_TEXT_COLOR)
 
             pygame.display.flip()
             self.clock.tick(30)

@@ -235,11 +235,11 @@ class RacingEnv:
 
         offset_reward = max(offset_reward, -5.0)
 
-        # Bonus for excellent apex hit
+        # Bonus for apex hit
         if behavior != "straight" and stage == "apex" and offset_error < 0.1:
             offset_reward += 2.0
 
-        # Bonus for crossing over the ideal offset (indicates movement toward it)
+        # Bonus for crossing over the ideal offset
         if (norm_offset - desired_offset) * (self.last_offset - desired_offset) < 0:
             offset_reward += 1.0 if (behavior != "straight" and stage == "apex") else 0.5
 
@@ -296,7 +296,7 @@ class RacingEnv:
         Detects curved segments based on curvature threshold and labels point behaviors.
 
         Parameters:
-            threshold (float): Minimum absolute curvature to be considered part of a curve.
+            threshold: Minimum absolute curvature to be considered part of a curve.
 
         Returns:
             list: List of (start_idx, end_idx, direction) for each detected curve segment.
@@ -310,14 +310,13 @@ class RacingEnv:
         extend_after = 10
         extend_counter = 0
 
-        # Detect curved segments and mark them 
         for i, curv in enumerate(self.curvatures):
             if abs(curv) > threshold:
                 if not in_curve:
                     in_curve = True
-                    start_idx = i  # 🔥 precise start of curve
+                    start_idx = i
                     direction = -1 if curv > 0 else 1
-                extend_counter = extend_after  # Reset extension delay
+                extend_counter = extend_after
             else:
                 if in_curve:
                     if extend_counter > 0:
@@ -336,17 +335,17 @@ class RacingEnv:
 
         # Detect if the curve wraps around from end to start
         if point_behaviors[0] != "straight" and point_behaviors[-1] != "straight":
-            # Find the contiguous curve at the start
+            # Find curve start
             start_idx = 0
             while start_idx < len(point_behaviors) and point_behaviors[start_idx] != "straight":
                 start_idx += 1
 
-            # Find the contiguous curve at the end
+            # Find curve end
             end_idx = len(point_behaviors) - 1
             while end_idx >= 0 and point_behaviors[end_idx] != "straight":
                 end_idx -= 1
 
-            # Relabel this wrap-around curve as straight
+            # Relabel this curve as straight
             for i in list(range(0, start_idx)) + list(range(end_idx + 1, len(point_behaviors))):
                 point_behaviors[i] = "straight"
 
@@ -365,9 +364,7 @@ class RacingEnv:
             direction (int): Turn direction (-1 = left, 1 = right).
         """
         curve_len = end_idx - start_idx + 1
-
         if curve_len <= 5:
-            # Short curves are labeled entirely as apex
             for j in range(start_idx, end_idx + 1):
                 behaviors[j] = ("apex", direction)
             return
@@ -394,32 +391,27 @@ class RacingEnv:
         adjust_start_exit = end_idx + 1
         adjust_end_exit = min(self.track_length - 1, end_idx + adjust_len_exit)
 
-        # --- Label pre-curve adjust/entry zone ---
+        # Label pre-curve adjust zone
         if adjust_end_entry >= adjust_start_entry:
             for j in range(adjust_start_entry, adjust_end_entry + 1):
-                if behaviors[j] != "straight":
-                    mid = (adjust_start_entry + adjust_end_entry) // 2
-                    behaviors[j] = ("adjust", direction) if j > mid else ("entry", direction)
-                else:
+                if behaviors[j] == "straight":
                     behaviors[j] = ("adjust", direction)
 
-        # --- Label post-curve exit/adjust zone ---
+        # Label post-curve adjust zone
         if adjust_end_exit >= adjust_start_exit:
             for j in range(adjust_start_exit, adjust_end_exit + 1):
-                if behaviors[j] != "straight":
-                    mid = (adjust_start_exit + adjust_end_exit) // 2
-                    behaviors[j] = ("adjust", direction) if j > mid else ("exit", direction)
-                else:
+                if behaviors[j] == "straight":
                     behaviors[j] = ("adjust", direction)
 
-        # --- Label the curve: entry → apex → exit ---
+        # Label the curve: entry → apex → exit
         for j in range(start_idx, end_idx + 1):
-            if start_idx <= j < apex_start:
-                behaviors[j] = ("entry", direction)
-            elif apex_start <= j <= apex_end:
-                behaviors[j] = ("apex", direction)
-            elif apex_end < j <= end_idx:
-                behaviors[j] = ("exit", direction)
+            if behaviors[j] == "straight":
+                if start_idx <= j < apex_start:
+                    behaviors[j] = ("entry", direction)
+                elif apex_start <= j <= apex_end:
+                    behaviors[j] = ("apex", direction)
+                elif apex_end < j <= end_idx:
+                    behaviors[j] = ("exit", direction)
 
     def _find_closest_index(self, distance):
         """

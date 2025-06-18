@@ -13,7 +13,7 @@ class GridBuilder:
         self.resolution = resolution
         self.cols = int(width // resolution)
         self.rows = int(height // resolution)
-        self.grid = np.zeros((self.rows, self.cols), dtype=np.uint8)  # shape: (rows, cols)
+        self.grid = np.zeros((self.rows, self.cols), dtype=np.uint8)
 
     def world_to_grid(self, x, y):
         """Convert from world coordinates (pixels) to grid indices."""
@@ -42,6 +42,7 @@ class GridBuilder:
                     self.grid[j, i] = 1  # obstacle
 
     def is_valid_cell(self, i, j):
+        """Determines if a cell is an obstacle or not."""
         return 0 <= i < self.cols and 0 <= j < self.rows and self.grid[j, i] == 0
 
     def get_cell_rects(self):
