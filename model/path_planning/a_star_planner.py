@@ -217,5 +217,5 @@ class AStarPlanner:
 
             max_iterations -= 1
 
-        print("A* failed to reach goal or complete loop")
+        print("A* failed to reach goal.")
         return None

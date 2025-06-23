@@ -24,7 +24,7 @@ class SimulationViewer:
         self.map_area_width = map_area_width
         self.clock = clock
 
-    def render_loop(self, track, car, best_line=None, grid_builder=None):
+    def render_loop(self, track, car, best_line=None, grid_builder=None, logging=False):
         """
         Main simulation loop.
         Renders the track, optional grid, and optional best path.
@@ -69,8 +69,8 @@ class SimulationViewer:
 
             if car_finished and not summary_shown:
                 real_time = (pygame.time.get_ticks() - start_ticks) / 1000.0
-                print(
-                    f"[{car.__class__.__name__}] Finished in {real_time:.2f} s, Max speed: {car.max_speed_reached * 3.6:.1f} km/h")
+                if logging:
+                    print(f"[Car] Finished in {real_time:.2f} s, Max speed: {car.max_speed_reached * 3.6:.1f} km/h")
                 self._draw_lap_summary(car, start_ticks, map_area_width)
                 summary_shown = True
 

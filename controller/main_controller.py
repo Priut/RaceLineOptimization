@@ -76,7 +76,7 @@ def train_qlearning_on_multiple_maps(track_list, episodes=500, graph=False, grap
 
     return agent
 
-def run_qlearning_simulation(visualizer, track, agent):
+def run_qlearning_simulation(visualizer, track, agent, logging=False):
     """
     Runs the trained agent on a given track and visualizes the path.
     """
@@ -98,11 +98,11 @@ def run_qlearning_simulation(visualizer, track, agent):
     )
 
     # Transform everything with consistent scale
-    track.x, track.y = zip(*[transform(x, y) for x, y in zip(track_x, track_y)])
+    track_x, track_y = zip(*[transform(x, y) for x, y in zip(track_x, track_y)])
     left_x, left_y = zip(*[transform(x, y) for x, y in zip(left_x, left_y)])
     right_x, right_y = zip(*[transform(x, y) for x, y in zip(right_x, right_y)])
 
-    env = RacingEnv(track.x, track.y, track.width)
+    env = RacingEnv(track_x, track_y, track.width)
     visualizer.simulationViewer.current_env = env
 
     state = env.reset()
@@ -137,8 +137,9 @@ def run_qlearning_simulation(visualizer, track, agent):
     scaled_q_x, scaled_q_y = zip(*[transform(x, y) for x, y in zip(q_x, q_y)])
 
     car = Car(scaled_q_x, scaled_q_y, track.width)
-    print(f"[Q-learning] Total reward: {total_reward:.2f}")
-    visualizer.render_q_agent(track, car, best_line=(scaled_q_x, scaled_q_y))
+    if logging:
+        print(f"[Q-learning] Total reward: {total_reward:.2f}")
+    visualizer.render_q_agent(Track(custom_x=track_x,custom_y=track_y,custom_width=track.width), car, best_line=(scaled_q_x, scaled_q_y))
 
 def smooth_path(x, y, smoothing=100.0, num_points=2000):
     """
@@ -214,7 +215,7 @@ def run_astar_in_background(visualizer, track, result_container):
     result = run_astar_simulation(visualizer, track)
     result_container.append(result)
 
-def run_astar_simulation(visualizer, track):
+def run_astar_simulation(visualizer, track, logging=False):
     """
     Runs the A* simulation and visualization for the current track layout.
     """
@@ -259,7 +260,8 @@ def run_astar_simulation(visualizer, track):
         a_star_x, a_star_y = simplify_racing_line(a_star_x, a_star_y, tolerance=10.0)
         a_star_x, a_star_y = smooth_path(a_star_x, a_star_y, smoothing=50.0)
         a_star_x, a_star_y = clip_path_to_track(a_star_x, a_star_y, left_x, left_y, right_x, right_y)
-        print(f"[A*] Nodes expanded: {astar.nodes_expanded}")
+        if logging:
+            print(f"[A*] Nodes expanded: {astar.nodes_expanded}")
         return a_star_x, a_star_y
     else:
         print("A* failed to build full loop path")
@@ -365,11 +367,15 @@ def process_all_demo_maps(demo_dir, visualizer, trained_agent):
     print("\nAll maps processed and saved.")
 
 
-
-def main():
+if __name__ == "__main__":
     pygame.init()
+    sima = 0
+    simq = 0
+    track_q = None
+    track_a = None
     visualizer = Visualizer()
     running = True
+    logging = False
 
     agent_path = "trained_agent.pkl"
     trained_agent = None
@@ -377,16 +383,16 @@ def main():
     # Load trained agent if it exists
     if os.path.exists(agent_path):
         trained_agent = QLearningAgent.load(agent_path)
-        print("[INFO] Loaded trained agent from disk.")
+        if logging:
+            print("[INFO] Loaded trained agent from disk.")
     else:
-        print("[INFO] Training new agent...")
+        if logging:
+            print("[INFO] Training new agent...")
         training_tracks = [Track() for _ in range(20)]
         trained_agent = train_qlearning_on_multiple_maps(training_tracks, episodes=5000)
         trained_agent.save(agent_path)
-        print(f"[INFO] Agent trained and saved to {agent_path}.")
-
-    demo_dir = "/home/priut/Documents/disertatie/RaceLineOptimization/demo_maps"
-    #process_all_demo_maps(demo_dir, visualizer, trained_agent)
+        if logging:
+            print(f"[INFO] Agent trained and saved to {agent_path}.")
 
     while running:
         choice = visualizer.show_main_menu()
@@ -400,36 +406,47 @@ def main():
                 sim_choice = visualizer.show_simulation_menu()
 
                 if sim_choice == "q-learning":
-                    eval_track = Track()
-                    run_qlearning_simulation(visualizer, eval_track, trained_agent)
+                    simq += 1
+                    if simq == 1:
+                        track_q = Track()
+                    elif simq > 2:
+                        simq = 1
+                        track_q = Track()
+
+                    run_qlearning_simulation(visualizer, track_q, trained_agent)
 
                 elif sim_choice == "a*":
-                    track = Track()
-                    visualizer.show_loading_screen(track, "Finding A* Path... Please wait")
+                    sima += 1
+                    if sima == 1:
+                        track_a = Track()
+                    elif sima > 2:
+                        sima = 1
+                        track_a = Track()
 
-                    # Start A* in background
+                    visualizer.show_loading_screen(track_a, "Finding A* Path... Please wait")
+
                     result_holder = []
-                    t = threading.Thread(target=run_astar_in_background, args=(visualizer, track, result_holder))
+                    t = threading.Thread(target=run_astar_in_background, args=(visualizer, track_a, result_holder))
                     start_time = time.time()
                     t.start()
 
-                    # Show loading until thread finishes
                     while t.is_alive():
                         for event in pygame.event.get():
                             if event.type == pygame.QUIT:
                                 pygame.quit()
-                                return
+                                sys.exit()
                         pygame.time.wait(100)
 
                     end_time = time.time()
 
                     duration_ms = (end_time - start_time) * 1000
-                    print(f"[A*] Path computed in {duration_ms:.0f} ms.")
+                    if logging:
+                        print(f"[A*] Path computed in {duration_ms:.0f} ms.")
 
                     if result_holder:
                         a_star_x, a_star_y = result_holder[0]
-                        car = Car(a_star_x, a_star_y, track.width)
-                        visualizer.render_astar(track, car, (a_star_x, a_star_y))
+                        car = Car(a_star_x, a_star_y, track_a.width)
+                        visualizer.render_astar(track_a, car, (a_star_x, a_star_y))
 
                 elif sim_choice == "back_to_main_menu":
                     break
